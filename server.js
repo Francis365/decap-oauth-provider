@@ -129,23 +129,26 @@ app.get('/callback', async (req, res) => {
     }
 
     // Return a small page that posts the token back to the CMS window
-    // Netlify/Decap expects message format: 'authorization:github:ACCESS_TOKEN'
+    // Decap expects message format: 'authorization:github:success:${JSON.stringify({token, provider})}'
+    const content = JSON.stringify({ token: accessToken, provider: "github" });
+    const message = JSON.stringify(`authorization:github:success:${content}`);
+
     const html = `<!doctype html>
 <html><head><meta charset="utf-8"/><title>Auth Complete</title></head>
 <body>
 <script>
   (function(){
-    function send(){
-      try {
-        if (window.opener) {
-          window.opener.postMessage('authorization:github:${accessToken}', '*');
-          window.close();
-        } else if (window.parent && window.parent !== window) {
-          window.parent.postMessage('authorization:github:${accessToken}', '*');
-        }
-      } catch (e) {}
+    function receiveMessage(e) {
+      console.log("receiveMessage %o", e);
+      // send message to main window with the app
+      window.opener.postMessage(${message}, e.origin);
     }
-    send();
+
+    window.addEventListener("message", receiveMessage, false);
+
+    // Start handshake with parent
+    console.log("Sending message: %o", "github");
+    window.opener.postMessage("authorizing:github", "*");
   })();
 </script>
 <p>Authentication complete. You can close this window.</p>
@@ -155,7 +158,34 @@ app.get('/callback', async (req, res) => {
     return res.status(200).send(html);
   } catch (e) {
     console.error(e);
-    return res.status(500).send('OAuth error');
+
+    // Return error page with proper postMessage format
+    const errorContent = JSON.stringify({ error: e.message || 'OAuth error' });
+    const errorMessage = JSON.stringify(`authorization:github:error:${errorContent}`);
+
+    const errorHtml = `<!doctype html>
+<html><head><meta charset="utf-8"/><title>Auth Error</title></head>
+<body>
+<script>
+  (function(){
+    function receiveMessage(e) {
+      console.log("receiveMessage %o", e);
+      // send error message to main window
+      window.opener.postMessage(${errorMessage}, e.origin);
+    }
+
+    window.addEventListener("message", receiveMessage, false);
+
+    // Start handshake with parent
+    console.log("Sending error message: %o", "github");
+    window.opener.postMessage("authorizing:github", "*");
+  })();
+</script>
+<p>Authentication failed. You can close this window.</p>
+</body></html>`;
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    return res.status(500).send(errorHtml);
   }
 });
 
