@@ -48,17 +48,28 @@ app.use(cors({
     try {
       const host = new URL(origin).host;
       if (ORIGINS.includes(host)) return cb(null, true);
-    } catch {}
+    } catch { }
     return cb(null, false);
   },
   credentials: true,
 }));
 
-// GET /auth?provider=github&origin=https://site.example
+// GET /auth?provider=github&origin=https://site.example or &site_id=site.example
 app.get('/auth', (req, res) => {
-  const { provider = 'github', origin } = req.query;
+  const { provider = 'github' } = req.query;
   if (provider !== 'github') return res.status(400).send('Unsupported provider');
-  if (!origin || !isAllowedOrigin(origin)) return res.status(400).send('Origin not allowed');
+
+  // accept both origin and site_id parameters
+  const raw = req.query.origin || req.query.site_id;
+  if (!raw) return res.status(400).send('Origin not allowed');
+
+  // normalize to full origin
+  const origin = raw.includes('://') ? raw : `https://${raw}`;
+
+  // allow scope override from query (else use env default)
+  const scope = req.query.scope || SCOPES;
+
+  if (!isAllowedOrigin(origin)) return res.status(400).send('Origin not allowed');
 
   const csrf = crypto.randomBytes(16).toString('hex');
   const statePayload = Buffer.from(JSON.stringify({ csrf, origin }), 'utf8').toString('base64url');
@@ -74,7 +85,7 @@ app.get('/auth', (req, res) => {
   const authorizeUrl = new URL('https://github.com/login/oauth/authorize');
   authorizeUrl.searchParams.set('client_id', CLIENT_ID);
   authorizeUrl.searchParams.set('redirect_uri', REDIRECT_URL);
-  authorizeUrl.searchParams.set('scope', SCOPES);
+  authorizeUrl.searchParams.set('scope', scope);
   authorizeUrl.searchParams.set('state', statePayload);
 
   return res.redirect(authorizeUrl.toString());
